@@ -14,4 +14,4 @@ services:
       - key: HF_DATASETS_CACHE
         value: /tmp/huggingface_cache/datasets
       - key: PERIPHERAL_API
-        value: https://your-peripheral-api.onrender.com
+        value: https://infinityperipheral.onrender.com
