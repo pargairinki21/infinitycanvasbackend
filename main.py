@@ -37,15 +37,13 @@ print("🤖 Checking for Hugging Face transformers...")
 chatbot = None
 try:
     from transformers import pipeline
-    # Using a lightweight conversational model
-    chatbot = pipeline("text-generation", 
-                      model="microsoft/DialoGPT-medium",
-                      tokenizer="microsoft/DialoGPT-medium")
-    print("✅ Hugging Face model initialized successfully")
+    print("📦 Transformers library available - models will load on first use")
+    # Don't load model during startup to avoid timeout
+    chatbot = None  # Will be loaded lazily when needed
 except ImportError:
     print("⚠️ Transformers not installed - using keyword-based responses only")
 except Exception as e:
-    print(f"⚠️ Hugging Face model not available: {e}")
+    print(f"⚠️ Transformers import failed: {e}")
     print("📝 Using enhanced keyword-based responses")
 PERIPHERAL_API = os.getenv('PERIPHERAL_API', 'http://127.0.0.1:8002')
 
@@ -379,4 +377,5 @@ async def get_pdf(filename: str):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"🚀 Starting server on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
