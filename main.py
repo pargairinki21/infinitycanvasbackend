@@ -8,7 +8,7 @@ import re
 import threading
 import requests
 from fastapi import FastAPI, UploadFile, File
-from openai import OpenAI
+# transformers import moved to conditional block below
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
@@ -18,14 +18,36 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure Hugging Face to use D drive for model storage
+os.environ['HF_HOME'] = 'D:/huggingface_cache'
+os.environ['TRANSFORMERS_CACHE'] = 'D:/huggingface_cache/transformers'
+os.environ['HF_DATASETS_CACHE'] = 'D:/huggingface_cache/datasets'
+
+# Create the cache directory if it doesn't exist
+import pathlib
+pathlib.Path('D:/huggingface_cache').mkdir(parents=True, exist_ok=True)
+pathlib.Path('D:/huggingface_cache/transformers').mkdir(parents=True, exist_ok=True)
+
 # === CONFIG ===
 FORMS_DIR = "downloaded_forms"
 PRINTER_NAME = "HP_LaserJet_Professional_P1108"
 EXTENSION = ".pdf"
-API_KEY = os.getenv('OPENAI_API_KEY', 'your-openai-api-key-here')
-print(f"🔑 Loaded API Key: {API_KEY[:10]}...{API_KEY[-4:] if len(API_KEY) > 14 else API_KEY}")
-client = OpenAI(api_key=API_KEY)
-PERIPHERAL_API = "http://127.0.0.1:8002"
+# Initialize Hugging Face model for text generation (optional)
+print("🤖 Checking for Hugging Face transformers...")
+chatbot = None
+try:
+    from transformers import pipeline
+    # Using a lightweight conversational model
+    chatbot = pipeline("text-generation", 
+                      model="microsoft/DialoGPT-medium",
+                      tokenizer="microsoft/DialoGPT-medium")
+    print("✅ Hugging Face model initialized successfully")
+except ImportError:
+    print("⚠️ Transformers not installed - using keyword-based responses only")
+except Exception as e:
+    print(f"⚠️ Hugging Face model not available: {e}")
+    print("📝 Using enhanced keyword-based responses")
+PERIPHERAL_API = os.getenv('PERIPHERAL_API', 'http://127.0.0.1:8002')
 
 # === FastAPI app ===
 app = FastAPI()
@@ -86,22 +108,23 @@ Important:
 chat_history = [{"role": "system", "content": system_prompt}]
 
 # === Helpers ===
-def transcribe_audio(filename):
-    y, sr = librosa.load(filename, sr=16000, mono=True)
-    yt, _ = librosa.effects.trim(y)
-    optimized = filename.replace('.wav', '_opt.wav')
-    sf.write(optimized, yt, 16000)
-    with open(optimized, 'rb') as f:
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1", file=f, language="en"
-        )
-    return transcript.text
+def transcribe_audio(audio_path):
+    # Simple fallback for audio transcription without OpenAI
+    # In a real implementation, you could use speech_recognition library
+    # or other open-source speech-to-text solutions
+    try:
+        # For now, return a placeholder message
+        return "Audio transcription temporarily unavailable. Please type your message instead."
+    except Exception as e:
+        return f"Audio processing error: {str(e)}"
 
 def ask_gpt(user_text):
     chat_history.append({"role": "user", "content": user_text})
     
-    # Simple keyword-based fallback for testing
+    # Enhanced keyword-based responses for banking forms
     user_lower = user_text.lower()
+    
+    # Banking form detection
     if any(word in user_lower for word in ["passbook", "entry", "form", "account", "bank"]):
         fallback_response = """MESSAGE: Yahan hai aapka passbook entry form!
 PRINT FLAG: YES
@@ -110,31 +133,55 @@ PERIPHERAL: <None>"""
         chat_history.append({"role": "assistant", "content": fallback_response})
         return fallback_response
     
-    try:
-        resp = client.chat.completions.create(model="gpt-3.5-turbo", messages=chat_history)
-        reply = resp.choices[0].message.content.strip()
-        chat_history.append({"role": "assistant", "content": reply})
-        return reply
-    except Exception as e:
-        error_msg = str(e)
-        if "quota" in error_msg.lower() or "billing" in error_msg.lower():
-            fallback_response = """MESSAGE: OpenAI quota exceeded. Using basic form matching instead.
-PRINT FLAG: NO
-CHECKLIST: <None>
+    # Loan application detection
+    if any(word in user_lower for word in ["loan", "credit", "mortgage", "borrow"]):
+        fallback_response = """MESSAGE: Here is your loan application form!
+PRINT FLAG: YES
+CHECKLIST: Income proof, Credit score, Collateral documents
 PERIPHERAL: <None>"""
-        elif "rate_limit" in error_msg.lower():
-            fallback_response = """MESSAGE: Too many requests. Please wait a moment and try again.
-PRINT FLAG: NO
-CHECKLIST: <None>
-PERIPHERAL: <None>"""
-        else:
-            fallback_response = f"""MESSAGE: AI service temporarily unavailable: {error_msg}
-PRINT FLAG: NO
-CHECKLIST: <None>
-PERIPHERAL: <None>"""
-        
         chat_history.append({"role": "assistant", "content": fallback_response})
         return fallback_response
+    
+    # Camera/Picture detection
+    if any(phrase in user_lower for phrase in ["take picture", "take photo", "camera", "capture", "photograph", "snap"]):
+        fallback_response = """MESSAGE: Taking picture now...
+PRINT FLAG: NO
+CHECKLIST: <None>
+PERIPHERAL: take_picture"""
+        chat_history.append({"role": "assistant", "content": fallback_response})
+        return fallback_response
+    
+    # Try using Hugging Face model if available
+    if chatbot is not None:
+        try:
+            # Create a banking context prompt
+            banking_prompt = f"Banking Assistant: Help with banking forms and services. User query: {user_text}\n\nResponse format:\nMESSAGE: [helpful response]\nPRINT FLAG: [YES/NO]\nCHECKLIST: [required documents]\nPERIPHERAL: <None>\n\nResponse:"
+            
+            # Generate response using Hugging Face model
+            response = chatbot(banking_prompt, max_length=200, num_return_sequences=1, temperature=0.7)
+            reply = response[0]['generated_text'].replace(banking_prompt, "").strip()
+            
+            # If the response doesn't follow our format, create a structured response
+            if "MESSAGE:" not in reply:
+                reply = f"""MESSAGE: {reply}
+PRINT FLAG: NO
+CHECKLIST: <None>
+PERIPHERAL: <None>"""
+            
+            chat_history.append({"role": "assistant", "content": reply})
+            return reply
+            
+        except Exception as e:
+            print(f"Hugging Face model error: {e}")
+    
+    # Fallback response when AI is not available
+    fallback_response = """MESSAGE: I'm here to help with banking forms and services. Please specify what type of form you need.
+PRINT FLAG: NO
+CHECKLIST: <None>
+PERIPHERAL: <None>"""
+    
+    chat_history.append({"role": "assistant", "content": fallback_response})
+    return fallback_response
 
 def parse_response(text):
     msg, flag, checklist, peripheral = "", "", "", ""
@@ -202,8 +249,8 @@ def get_form_path(filename):
 def call_peripheral_api(endpoint: str):
     try:
         if endpoint and endpoint != "<None>":
-            print(f"🔗 Calling peripheral API: {PERIPHERAL_API}{endpoint}")
-            response = requests.post(f"{PERIPHERAL_API}{endpoint}", timeout=5)
+            print(f"🔗 Calling peripheral API: {PERIPHERAL_API}/{endpoint}")
+            response = requests.post(f"{PERIPHERAL_API}/{endpoint}", timeout=15)
             print(f"✅ Peripheral API response: {response.status_code}")
             return response.json()
     except requests.exceptions.ConnectionError as e:
@@ -269,6 +316,34 @@ async def process_audio(file: UploadFile = File(...)):
 async def chat(req: ChatRequest):
     user_text = req.message.strip()
     return handle_user_text(user_text)
+
+# === PERIPHERAL API PROXY ===
+@app.post("/take_picture")
+async def take_picture_proxy():
+    """Proxy endpoint to call peripheral API and avoid CORS issues"""
+    try:
+        response = requests.post(f"{PERIPHERAL_API}/take_picture", timeout=10)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Failed to connect to peripheral API: {str(e)}"}
+
+@app.get("/peripheral/{endpoint:path}")
+async def peripheral_proxy(endpoint: str):
+    """Generic proxy for GET requests to peripheral API"""
+    try:
+        response = requests.get(f"{PERIPHERAL_API}/{endpoint}", timeout=10)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Failed to connect to peripheral API: {str(e)}"}
+
+@app.post("/peripheral/{endpoint:path}")
+async def peripheral_proxy_post(endpoint: str, request: dict = None):
+    """Generic proxy for POST requests to peripheral API"""
+    try:
+        response = requests.post(f"{PERIPHERAL_API}/{endpoint}", json=request, timeout=10)
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Failed to connect to peripheral API: {str(e)}"}
 
 # === NEW PDF ENDPOINT ===
 # === NEW PDF ENDPOINT ===

@@ -7,3 +7,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
+      - key: HF_HOME
+        value: /tmp/huggingface_cache
+      - key: TRANSFORMERS_CACHE
+        value: /tmp/huggingface_cache/transformers
+      - key: HF_DATASETS_CACHE
+        value: /tmp/huggingface_cache/datasets
+      - key: PERIPHERAL_API
+        value: https://your-peripheral-api.onrender.com

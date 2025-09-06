@@ -22,7 +22,6 @@ llvmlite==0.44.0
 msgpack==1.1.1
 numba==0.61.2
 numpy==2.2.6
-openai==1.51.0
 packaging==25.0
 platformdirs==4.3.8
 pooch==1.8.2
@@ -49,3 +48,5 @@ urllib3==2.5.0
 uvicorn[standard]==0.35.0
 gunicorn==21.2.0
 python-dotenv==1.0.0
+transformers==4.36.0
+torch==2.1.0
